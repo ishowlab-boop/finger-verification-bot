@@ -1,43 +1,31 @@
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import Router
 import asyncio
-from PIL import Image, ImageDraw
-import io
 import os
 from datetime import datetime
+from PIL import Image, ImageDraw
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
-router = Router()
 
 user_data = {}
 
-FINGER_EMOJIS = [
-    "🫆", "✋", "👆", "👇", "👈", "👉", "👍", "👎", "👌", "✌️",
-    "🤞", "🤘", "🤙", "🖐️", "✊", "👊", "🤛", "🤜", "👋", "🫱",
-    "🫲", "🫳", "🫴", "🫵", "🤏", "🤌", "🖖", "🫰", "💪", "🙌"
-]
+FINGER_EMOJIS = ["🫆","✋","👆","👇","👈","👉","👍","👎","👌","✌️","🤞","🤘","🖐️","✊","👊","👋","🫱","🫲","💪","🙌"]
 
-@router.message(Command("start"))
+@dp.message(Command("start"))
 async def start(message: types.Message):
     user_data[message.from_user.id] = {}
-    await message.answer(
-        "👋 **Finger Verification Paper Bot** এ স্বাগতম!\n\n"
-        "প্রথমে তোমার তথ্য দাও:\n"
-        "নাম লিখো (Full Name):"
-    )
+    await message.answer("👋 স্বাগতম!\n\nতোমার **Full Name** লিখো:")
 
-@router.message()
-async def process_info(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_data:
-        await message.answer("আবার /start করো")
-        return
+@dp.message()
+async def collect_data(message: types.Message):
+    uid = message.from_user.id
+    if uid not in user_data:
+        return await message.answer("/start চাপো")
 
-    data = user_data[user_id]
-    
+    data = user_data[uid]
+
     if "name" not in data:
         data["name"] = message.text
         await message.answer("পিতার নাম লিখো:")
@@ -49,77 +37,64 @@ async def process_info(message: types.Message):
         await message.answer("ঠিকানা লিখো:")
     elif "address" not in data:
         data["address"] = message.text
-        await show_finger_selection(message)
+        await send_finger_options(message)
     else:
-        await message.answer("ইতিমধ্যে প্রসেস চলছে...")
+        await message.answer("নতুন করতে /start চাপো")
 
-async def show_finger_selection(message: types.Message):
-    keyboard = InlineKeyboardMarkup(row_width=4)
-    buttons = [InlineKeyboardButton(text=emoji, callback_data=f"finger_{emoji}") for emoji in FINGER_EMOJIS]
-    keyboard.inline_keyboard = [buttons[i:i+4] for i in range(0, len(buttons), 4)]
-    
-    await message.answer(
-        "✅ তথ্য সংগ্রহ হয়েছে!\n\n"
-        "এখন ফিঙ্গারপ্রিন্টের জন্য একটা ইমোজি সিলেক্ট করো:",
-        reply_markup=keyboard
-    )
+async def send_finger_options(message: types.Message):
+    kb = InlineKeyboardMarkup(row_width=5)
+    for e in FINGER_EMOJIS:
+        kb.add(InlineKeyboardButton(text=e, callback_data=f"fp_{e}"))
+    await message.answer("🖐️ ফিঙ্গারপ্রিন্ট ইমোজি সিলেক্ট করো:", reply_markup=kb)
 
-@router.callback_query(F.callback_data.startswith("finger_"))
-async def generate_paper(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    emoji = callback.data.split("_")[1]
-    
-    if user_id not in user_data:
-        await callback.answer("সমস্যা হয়েছে, আবার /start করো")
-        return
+@dp.callback_query(F.callback_data.startswith("fp_"))
+async def make_paper(callback: types.CallbackQuery):
+    try:
+        uid = callback.from_user.id
+        emoji = callback.data[3:]   # fp_ বাদ দিয়ে ইমোজি নেওয়া
 
-    data = user_data[user_id]
-    
-    # Create image
-    img = Image.new('RGB', (800, 1000), color='#f0f0f0')
-    draw = ImageDraw.Draw(img)
-    
-    # Header
-    draw.rectangle([0, 0, 800, 120], fill='#1e3a8a')
-    draw.text((150, 40), "FINGERPRINT VERIFICATION PAPER", fill='white', font_size=35)
-    
-    # Info
-    lines = [
-        f"Full Name     : {data.get('name', 'N/A')}",
-        f"Father's Name : {data.get('father', 'N/A')}",
-        f"Date of Birth : {data.get('dob', 'N/A')}",
-        f"Address       : {data.get('address', 'N/A')}",
-        f"Date          : {datetime.now().strftime('%d/%m/%Y')}",
-        "",
-        "Fingerprint:"
-    ]
-    
-    y = 180
-    for line in lines:
-        draw.text((50, y), line, fill='black', font_size=26)
-        y += 55
-    
-    # Fingerprint box
-    draw.rectangle([280, 520, 520, 760], outline='#1e3a8a', width=10)
-    draw.text((360, 590), emoji, font_size=140)
-    
-    draw.text((250, 820), "Authorized Signature / Stamp", fill='gray', font_size=26)
-    
-    # Save to bytes
-    bio = io.BytesIO()
-    img.save(bio, 'PNG')
-    bio.seek(0)
-    
-    await callback.message.answer_photo(
-        bio,
-        caption="✅ তোমার Fingerprint Verification Paper রেডি!\n\nআবার /start করো নতুন একটা বানাতে।"
-    )
-    await callback.answer("✅ Done!")
+        data = user_data.get(uid, {})
 
-dp.include_router(router)
+        # সিম্পল ইমেজ
+        img = Image.new("RGB", (800, 950), "#f0f4f8")
+        draw = ImageDraw.Draw(img)
+
+        draw.rectangle((0, 0, 800, 100), fill="#1e3a8a")
+        draw.text((150, 35), "FINGERPRINT VERIFICATION", fill="white", size=30)
+
+        texts = [
+            f"Name     : {data.get('name','N/A')}",
+            f"Father   : {data.get('father','N/A')}",
+            f"DOB      : {data.get('dob','N/A')}",
+            f"Address  : {data.get('address','N/A')}",
+            f"Date     : {datetime.now().strftime('%d/%m/%Y')}"
+        ]
+
+        y = 160
+        for t in texts:
+            draw.text((40, y), t, fill="black", size=22)
+            y += 55
+
+        # ফিঙ্গার বক্স
+        draw.rectangle((280, 480, 520, 720), outline="#1e3a8a", width=12)
+        draw.text((370, 560), emoji, size=130)
+
+        draw.text((280, 780), "Signature / Stamp", fill="#555", size=20)
+
+        # পাঠানো
+        bio = io.BytesIO()
+        img.save(bio, "PNG")
+        bio.seek(0)
+
+        await callback.message.answer_photo(bio, caption="✅ তোমার Verification Paper রেডি!")
+        await callback.answer("সফল!")
+
+    except Exception as e:
+        await callback.answer("❌ এরর হয়েছে। আবার চেষ্টা করো")
+        print("Error:", e)
 
 async def main():
-    print("✅ Finger Verification Bot চালু হয়েছে...")
+    print("Bot Starting...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
