@@ -3,8 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 import os
-import fal_client
 from datetime import datetime
+import fal_client
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
@@ -13,94 +13,88 @@ client = fal_client.AsyncClient(key=os.getenv("FAL_KEY"))
 
 user_data = {}
 
-# Finger options with proper prompt names
 FINGERS = {
-    "🫆": "index finger",
-    "👆": "right index finger",
-    "👇": "middle finger",
-    "✌️": "two fingers (peace sign)",
-    "👍": "thumb up",
-    "👌": "OK sign",
-    "🤘": "rock on sign",
-    "🖐️": "open palm with all fingers",
+    "👆": "right index finger raised clearly towards the camera",
+    "🫆": "index finger prominently visible",
+    "✌️": "peace sign with two fingers",
+    "👍": "thumb up gesture",
+    "👌": "OK hand sign",
+    "🤘": "rock on / devil horns sign",
+    "🖐️": "open palm showing all five fingers",
+    "👇": "middle finger pointing down",
 }
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    kb = InlineKeyboardMarkup(row_width=4)
-    for emoji, name in FINGERS.items():
+    await message.answer(
+        "📸 **AI Finger Verification Bot**\n\n"
+        "প্রথমে যে ছবিটা এডিট করতে চাও সেটা পাঠাও (photo হিসেবে):"
+    )
+
+@dp.message(F.photo)
+async def receive_photo(message: types.Message):
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    file_url = f"https://api.telegram.org/file/bot{os.getenv('BOT_TOKEN')}/{file.file_path}"
+    
+    user_data[message.from_user.id] = {
+        "image_url": file_url,
+        "username": message.from_user.first_name
+    }
+    
+    # Finger selection
+    kb = InlineKeyboardMarkup(row_width=3)
+    for emoji, desc in FINGERS.items():
         kb.add(InlineKeyboardButton(text=emoji, callback_data=f"finger_{emoji}"))
     
     await message.answer(
-        "🖐️ **Finger Verification Bot**\n\n"
-        "যে ফিঙ্গার তুলে ধরতে চাও সেটা সিলেক্ট করো:",
+        "✅ ছবি পেয়েছি!\n\n"
+        "এখন কোন ফিঙ্গার তুলে ধরতে চাও? সিলেক্ট করো:",
         reply_markup=kb
     )
 
 @dp.callback_query(F.callback_data.startswith("finger_"))
-async def process_finger(callback: types.CallbackQuery):
-    emoji = callback.data.split("_")[1]
-    finger_name = FINGERS.get(emoji, "index finger")
-    
-    user_data[callback.from_user.id] = {
-        "emoji": emoji,
-        "finger_name": finger_name,
-        "image_url": "https://i.imgur.com/YOUR_IMAGE_LINK.jpg"  # পরে চেঞ্জ করবো
-    }
-    
-    await callback.message.answer(
-        f"✅ সিলেক্ট করা হয়েছে: {emoji}\n\n"
-        "এখন তোমার **Full Name** লিখো:"
-    )
-    await callback.answer()
-
-@dp.message()
-async def collect_info(message: types.Message):
-    uid = message.from_user.id
+async def edit_image(callback: types.CallbackQuery):
+    uid = callback.from_user.id
     if uid not in user_data:
-        return await message.answer("/start চাপো")
+        return await callback.answer("ছবি আগে পাঠাও")
 
+    emoji = callback.data.split("_")[1]
+    finger_desc = FINGERS[emoji]
     data = user_data[uid]
 
-    if "name" not in data:
-        data["name"] = message.text
-        await message.answer("পিতার নাম লিখো:")
-    elif "father" not in data:
-        data["father"] = message.text
-        await generate_ai_image(message, data)
+    await callback.message.answer("🧠 AI এডিট করা হচ্ছে... ১৫-৪০ সেকেন্ড লাগবে")
 
-async def generate_ai_image(message: types.Message, data):
     try:
-        await message.answer("🧠 AI দিয়ে ছবি এডিট করা হচ্ছে... কিছুক্ষণ সময় লাগবে।")
-
-        prompt = f"the girl is holding up her {data['finger_name']} clearly visible towards the camera, photorealistic, same face, same girl, same outfit, high detail"
+        prompt = f"photorealistic edit, the person in the photo is clearly holding up their {finger_desc}, same person, same face, same clothes, natural lighting, high detail, sharp focus"
 
         result = await client.run(
-            "fal-ai/flux-pro/kontext",  # অথবা "xai/grok-imagine-image/edit"
+            "fal-ai/flux-pro/kontext",
             arguments={
-                "image_url": "https://files.catbox.moe/0v3f8k.jpg",  # তোমার ছবির লিংক এখানে দাও
+                "image_url": data["image_url"],
                 "prompt": prompt,
-                "strength": 0.75,
+                "strength": 0.70,
                 "num_images": 1
             }
         )
 
         edited_url = result["images"][0]["url"]
 
-        await message.answer_photo(
+        await callback.message.answer_photo(
             edited_url,
-            caption=f"✅ **Finger Verification Complete**\n\n"
-                    f"Name   : {data.get('name')}\n"
-                    f"Father : {data.get('father')}\n"
-                    f"Date   : {datetime.now().strftime('%d/%m/%Y')}\n\n"
-                    f"Selected Finger: {data['emoji']}"
+            caption=f"✅ **AI Finger Verification Done!**\n\n"
+                    f"User     : {data['username']}\n"
+                    f"Date     : {datetime.now().strftime('%d/%m/%Y %I:%M %p')}\n"
+                    f"Finger   : {emoji}"
         )
 
     except Exception as e:
-        await message.answer(f"❌ এরর হয়েছে: {str(e)}\n\nআবার /start চাপো")
+        await callback.message.answer(f"❌ এরর হয়েছে:\n{str(e)[:200]}\n\nআবার ছবি পাঠিয়ে চেষ্টা করো")
+
+    await callback.answer()
 
 async def main():
-    print("✅ AI Finger Verification Bot চালু আছে...")
+    print("✅ Dynamic AI Finger Verification Bot চালু আছে...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
