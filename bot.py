@@ -1,4 +1,4 @@
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
@@ -8,6 +8,7 @@ import fal_client
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
+router = Router()
 
 client = fal_client.AsyncClient(key=os.getenv("FAL_KEY"))
 
@@ -23,48 +24,41 @@ FINGERS = {
     "🖐️": "open hand",
 }
 
-@dp.message(Command("start"))
+@router.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("📸 এডিট করার জন্য একটা ছবি পাঠাও:")
 
-@dp.message(F.photo)
+@router.message(F.photo)
 async def receive_photo(message: types.Message):
     try:
         photo = message.photo[-1]
         file = await bot.get_file(photo.file_id)
         file_url = f"https://api.telegram.org/file/bot{os.getenv('BOT_TOKEN')}/{file.file_path}"
 
-        user_data[message.from_user.id] = {
-            "image_url": file_url,
-            "username": message.from_user.first_name
-        }
+        user_data[message.from_user.id] = {"image_url": file_url, "username": message.from_user.first_name}
 
-        # Correct Inline Keyboard
-        keyboard_buttons = [[InlineKeyboardButton(text=emoji, callback_data=f"finger_{emoji}")] for emoji in FINGERS]
-        kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        buttons = [[InlineKeyboardButton(text=emoji, callback_data=f"finger_{emoji}")] for emoji in FINGERS.keys()]
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-        await message.answer(
-            "✅ ছবি পেয়েছি!\n\nকোন ফিঙ্গার তুলে ধরতে চাও?",
-            reply_markup=kb
-        )
+        await message.answer("✅ ছবি পেয়েছি!\n\nকোন ফিঙ্গার চাও?", reply_markup=kb)
+
     except Exception as e:
         await message.answer("❌ ছবি প্রসেস করতে সমস্যা হয়েছে। আবার পাঠাও।")
 
-# ✅ Callback Handler
-@dp.callback_query(F.callback_data.startswith("finger_"))
+@router.callback_query(F.callback_data.startswith("finger_"))
 async def edit_image(callback: types.CallbackQuery):
     uid = callback.from_user.id
     if uid not in user_data:
-        return await callback.answer("আগে ছবি পাঠাও /start", show_alert=True)
+        return await callback.answer("আগে ছবি পাঠাও!", show_alert=True)
 
     emoji = callback.data.split("_")[1]
     finger_desc = FINGERS[emoji]
     data = user_data[uid]
 
-    await callback.message.answer("🧠 AI এডিট হচ্ছে... ১৫-৪০ সেকেন্ড লাগবে")
+    await callback.message.answer("🧠 AI এডিট হচ্ছে... অপেক্ষা করো (২০-৪০ সেকেন্ড)")
 
     try:
-        prompt = f"photorealistic, the person is clearly holding up their {finger_desc}, same face, same body, same clothes, natural lighting, sharp"
+        prompt = f"photorealistic edit, the person is clearly holding their {finger_desc} towards camera, same person, same face, same clothes"
 
         result = await client.run(
             "fal-ai/flux-pro/kontext",
@@ -80,18 +74,17 @@ async def edit_image(callback: types.CallbackQuery):
 
         await callback.message.answer_photo(
             edited_url,
-            caption=f"✅ **সফল হয়েছে!**\n\n"
-                    f"Name : {data['username']}\n"
-                    f"Finger : {emoji}\n"
-                    f"Date : {datetime.now().strftime('%d/%m/%Y')}"
+            caption=f"✅ সফল হয়েছে!\nFinger: {emoji}\nDate: {datetime.now().strftime('%d/%m/%Y')}"
         )
     except Exception as e:
-        await callback.message.answer(f"❌ এরর হয়েছে:\n{str(e)[:200]}")
+        await callback.message.answer(f"❌ AI Error: {str(e)[:150]}")
 
-    await callback.answer("✅ Done!")
+    await callback.answer()
+
+dp.include_router(router)
 
 async def main():
-    print("🚀 Bot Running...")
+    print("🚀 Bot Started - Waiting for photo...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
